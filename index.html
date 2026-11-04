@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BioEmbed-eDNA | Sequence Embedding & Dark Taxa Discovery</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ cache_bust }}">
+</head>
+<body>
+  <div class="abyss" aria-hidden="true">
+    <div class="orb o1"></div><div class="orb o2"></div><div class="orb o3"></div>
+  </div>
+
+  <main class="shell">
+    <!-- Masthead -->
+    <header class="masthead">
+      <canvas id="helix" width="96" height="132" aria-hidden="true"></canvas>
+      <div>
+        <div class="badge-row">
+          <span class="eyebrow">eDNA Metabarcoding &middot; Final Year Project</span>
+          <span class="status-chip" id="engine-status">● Engine: Online (Canonical k-mer, k=4)</span>
+        </div>
+        <h1>BioEmbed-<span class="glow">eDNA</span></h1>
+        <p class="lede">
+          High-throughput environmental DNA taxonomy and <strong>dark taxa discovery platform</strong>.
+          Projects sequences into continuous embedding space, recovers novel unaligned biological lineages,
+          and estimates true community biodiversity.
+        </p>
+      </div>
+    </header>
+
+    <!-- Upload & Preset Demos -->
+    <section class="panel control-panel">
+      <div class="preset-bar">
+        <span class="preset-label">⚡ 1-Click Demo Datasets:</span>
+        <button type="button" class="btn btn-preset" data-preset="marine_coastal_edna">
+          🌊 Marine Coastal eDNA (Fish + Dark Protists)
+        </button>
+        <button type="button" class="btn btn-preset" data-preset="river_estuary_edna">
+          🏞️ River Estuary Hydro-eDNA (Freshwater Biota)
+        </button>
+      </div>
+
+      <form id="upload-form">
+        <div id="drop-zone" class="dropzone" tabindex="0" role="button" aria-label="Choose or drop a sequence file">
+          <div class="dz-head">
+            <div>
+              <p class="dz-title">Drop custom FASTA / FASTQ file here</p>
+              <p class="dz-sub">or click to browse &middot; <span id="file-name">no file chosen</span></p>
+            </div>
+            <button type="submit" id="analyze-btn" class="btn btn-primary" disabled>Analyze Upload</button>
+          </div>
+          <div class="scanner"></div>
+          <div class="ticker"><span id="ticker" class="ticker-track"></span></div>
+          <input type="file" id="file-input" name="file" accept=".fasta,.fa,.fna,.fastq,.fq,.txt" hidden>
+        </div>
+        <p id="status-message" class="status-msg"></p>
+      </form>
+    </section>
+
+    <!-- Results Section -->
+    <section id="results-section" class="hidden">
+      <!-- Summary Bar -->
+      <div class="summary-banner">
+        <div class="summary-left">
+          <h2 id="sample-title">Metabarcoding Community Analysis</h2>
+          <span id="run-summary" class="summary-meta"></span>
+        </div>
+        <div class="summary-actions">
+          <button type="button" id="btn-export-csv" class="btn btn-outline">📥 Export CSV</button>
+          <button type="button" id="btn-print-report" class="btn btn-outline">🖨️ Print Thesis Report</button>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <nav class="tab-nav" role="tablist">
+        <button type="button" class="tab-btn active" data-tab="tab-map">🌐 Sequence Map (UMAP)</button>
+        <button type="button" class="tab-btn" data-tab="tab-qc">🧪 Sequence QC</button>
+        <button type="button" class="tab-btn" data-tab="tab-bio">🌿 Biodiversity &amp; Whittaker</button>
+        <button type="button" class="tab-btn" data-tab="tab-bench">⚖️ BLAST Benchmark</button>
+        <button type="button" class="tab-btn" data-tab="tab-beta">🔄 Beta Diversity (Compare)</button>
+        <button type="button" class="tab-btn" data-tab="tab-reads">📋 Read Inspector</button>
+        <button type="button" class="tab-btn" data-tab="tab-thesis">📄 Thesis Summary</button>
+      </nav>
+
+      <!-- TAB 1: 2D SEQUENCE MAP -->
+      <div id="tab-map" class="tab-content active">
+        <div class="map-grid">
+          <div class="panel map-card">
+            <div class="card-head">
+              <h3>2D Sequence Embedding Manifold (UMAP / PCA)</h3>
+              <span class="hint">Includes Reference Anchor Beacons (★)</span>
+            </div>
+            <div class="map-wrap">
+              <canvas id="map"></canvas>
+              <div id="map-tip"></div>
+            </div>
+            <p class="map-hint">Hover over points to inspect read divergence. Click a point to highlight its record in the table below.</p>
+            <div id="map-legend" class="legend"></div>
+          </div>
+          <div class="panel comp-card">
+            <div class="card-head">
+              <h3>Community Taxonomic Breakdown</h3>
+              <span class="hint">Known vs. Novel Clades</span>
+            </div>
+            <div id="composition" class="composition-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 2: QUALITY CONTROL (QC) -->
+      <div id="tab-qc" class="tab-content">
+        <div class="qc-metrics-grid" id="qc-stat-cards"></div>
+        <div class="grid-2col">
+          <div class="panel">
+            <div class="card-head">
+              <h3>GC Content Distribution (%)</h3>
+              <span class="hint">Mean GC &plusmn; Std Dev</span>
+            </div>
+            <div class="chart-container">
+              <canvas id="gc-chart" height="200"></canvas>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="card-head">
+              <h3>Read Length Profile (bp)</h3>
+              <span class="hint">Amplicon size dispersion</span>
+            </div>
+            <div class="chart-container">
+              <canvas id="length-chart" height="200"></canvas>
+            </div>
+          </div>
+        </div>
+        <div class="panel" id="quality-score-panel">
+          <div class="card-head">
+            <h3>FASTQ Phred Quality Score Profile</h3>
+            <span class="hint" id="qc-q30-label">Q30 Pass Rate</span>
+          </div>
+          <div class="chart-container">
+            <canvas id="qscore-chart" height="180"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 3: BIODIVERSITY & WHITTAKER -->
+      <div id="tab-bio" class="tab-content">
+        <div id="metrics" class="metrics"></div>
+
+        <div class="grid-2col mt-4">
+          <div class="panel">
+            <div class="card-head">
+              <h3>Whittaker Rank-Abundance Curve</h3>
+              <span class="hint">Log-relative abundance vs species rank</span>
+            </div>
+            <div class="chart-container">
+              <canvas id="whittaker-chart" height="230"></canvas>
+            </div>
+            <p class="card-note">A steep slope indicates dominant species; a flatter curve represents high ecological evenness (Pielou J').</p>
+          </div>
+          <div class="panel">
+            <div class="card-head">
+              <h3>Taxonomic Cluster Summaries (cOTUs)</h3>
+              <span class="hint">Cluster size, dispersion, and consensus taxonomy</span>
+            </div>
+            <div class="table-wrap mini-table">
+              <table id="clusters-table">
+                <thead>
+                  <tr>
+                    <th>cOTU ID</th>
+                    <th>Dominant Taxon</th>
+                    <th>Classification</th>
+                    <th>Abundance</th>
+                    <th>Dispersion</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 4: EMPIRICAL BENCHMARK (BLAST VS BIOEMBED) -->
+      <div id="tab-bench" class="tab-content">
+        <div class="benchmark-hero panel">
+          <div class="bench-stats">
+            <div class="bench-col">
+              <h4>Traditional Alignment (BLAST-like)</h4>
+              <div class="bench-kpi" id="blast-discard-rate">--%</div>
+              <p class="bench-sub">Discarded as "Unassigned Dark Taxa"</p>
+              <div class="bench-detail" id="blast-richness-val">Observed Richness: --</div>
+              <div class="bench-detail" id="blast-shannon-val">Shannon Diversity: --</div>
+            </div>
+            <div class="bench-vs">VS</div>
+            <div class="bench-col highlight">
+              <h4>BioEmbed Pipeline (Embedding + HDBSCAN)</h4>
+              <div class="bench-kpi glow-kpi" id="bioembed-rescue-rate">-- reads</div>
+              <p class="bench-sub">Dark Taxa Rescued into Candidate Novel Taxa</p>
+              <div class="bench-detail" id="bioembed-richness-val">True Total Richness: --</div>
+              <div class="bench-detail" id="bioembed-shannon-val">True Shannon Diversity: --</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel mt-4">
+          <div class="card-head">
+            <h3>Sample Read Comparison (Alignment vs. Embedding)</h3>
+            <span class="hint">Shows unaligned reads rescued by BioEmbed</span>
+          </div>
+          <div class="table-wrap">
+            <table id="benchmark-table">
+              <thead>
+                <tr>
+                  <th>Read #</th>
+                  <th>BLAST Best Match</th>
+                  <th>BLAST Identity</th>
+                  <th>BLAST Decision</th>
+                  <th>BioEmbed Classification</th>
+                  <th>Closest Ref</th>
+                  <th>BioEmbed Outcome</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 5: BETA DIVERSITY (MULTI-SAMPLE) -->
+      <div id="tab-beta" class="tab-content">
+        <div class="panel">
+          <div class="card-head">
+            <h3>Compare Two Environmental Sites (Beta Diversity)</h3>
+            <span class="hint">Quantifies community turnover between ecosystems</span>
+          </div>
+          <div class="compare-controls">
+            <div class="compare-select">
+              <label for="select-sample-a">Sample A:</label>
+              <select id="select-sample-a">
+                <option value="marine_coastal_edna" selected>🌊 Marine Coastal eDNA</option>
+                <option value="river_estuary_edna">🏞️ River Estuary Hydro-eDNA</option>
+              </select>
+            </div>
+            <div class="compare-select">
+              <label for="select-sample-b">Sample B:</label>
+              <select id="select-sample-b">
+                <option value="marine_coastal_edna">🌊 Marine Coastal eDNA</option>
+                <option value="river_estuary_edna" selected>🏞️ River Estuary Hydro-eDNA</option>
+              </select>
+            </div>
+            <button type="button" id="btn-run-compare" class="btn btn-primary">Run Comparative Beta Analysis</button>
+          </div>
+        </div>
+
+        <div id="beta-results" class="hidden mt-4">
+          <div class="grid-2col">
+            <div class="panel">
+              <div class="card-head">
+                <h3>Dissimilarity Indices</h3>
+                <span class="hint">Abundance &amp; Presence/Absence turnover</span>
+              </div>
+              <div class="beta-kpi-grid">
+                <div class="beta-card">
+                  <span class="beta-val" id="bc-val">--</span>
+                  <span class="beta-lbl">Bray-Curtis Dissimilarity</span>
+                  <span class="beta-desc">0 = identical mix, 1 = completely disjoint</span>
+                </div>
+                <div class="beta-card">
+                  <span class="beta-val" id="jaccard-val">--</span>
+                  <span class="beta-lbl">Jaccard Community Distance</span>
+                  <span class="beta-desc">Taxonomic presence/absence turnover</span>
+                </div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="card-head">
+                <h3>Taxonomic Partitioning</h3>
+                <span class="hint">Shared vs Private Taxa</span>
+              </div>
+              <div class="chart-container">
+                <canvas id="beta-overlap-chart" height="200"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 6: READ INSPECTOR -->
+      <div id="tab-reads" class="tab-content">
+        <div class="panel">
+          <div class="reads-toolbar">
+            <div id="filters" class="filters"></div>
+            <input type="text" id="search-reads" class="input-search" placeholder="🔍 Search read ID or taxon name...">
+          </div>
+          <div class="table-wrap">
+            <table id="results-table">
+              <thead>
+                <tr>
+                  <th>Sequence ID</th>
+                  <th>cOTU Cluster</th>
+                  <th>Biological Category</th>
+                  <th>Closest Known Taxon</th>
+                  <th>Taxonomic Lineage</th>
+                  <th>Divergence (d)</th>
+                  <th>Confidence</th>
+                  <th>Length (bp)</th>
+                  <th>GC%</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 7: THESIS SUMMARY & METHODOLOGY -->
+      <div id="tab-thesis" class="tab-content">
+        <div class="panel thesis-paper">
+          <div class="paper-header">
+            <h3>eDNA Sequence Embedding and Dark Taxa Identification System</h3>
+            <p class="paper-author">Final Year Capstone Project &middot; Evaluation &amp; Methodology Dossier</p>
+          </div>
+
+          <div class="paper-section">
+            <h4>1. Mathematical &amp; Ecological Formulations</h4>
+            <div class="formula-grid">
+              <div class="formula-card">
+                <strong>Shannon-Wiener Entropy ($H'$)</strong>
+                <p>$$H' = -\sum_{i=1}^{S} p_i \ln(p_i)$$</p>
+                <span>Measures community uncertainty and information content.</span>
+              </div>
+              <div class="formula-card">
+                <strong>Gini-Simpson Diversity ($1 - D$)</strong>
+                <p>$$1 - D = 1 - \frac{\sum n_i(n_i - 1)}{N(N - 1)}$$</p>
+                <span>Probability that two randomly drawn reads belong to distinct taxa.</span>
+              </div>
+              <div class="formula-card">
+                <strong>Chao1 Richness Estimator ($S_{Chao1}$)</strong>
+                <p>$$S_{Chao1} = S_{obs} + \frac{f_1^2}{2f_2}$$</p>
+                <span>Asymptotic richness accounting for unseen rare singletons ($f_1$) and doubletons ($f_2$).</span>
+              </div>
+              <div class="formula-card">
+                <strong>Pielou's Evenness ($J'$)</strong>
+                <p>$$J' = \frac{H'}{\ln(S_{obs})}$$</p>
+                <span>Equitability of species abundance distribution bounded in $[0, 1]$.</span>
+              </div>
+              <div class="formula-card">
+                <strong>Bray-Curtis Dissimilarity ($BC$)</strong>
+                <p>$$BC_{jk} = 1 - \frac{2\sum \min(c_{ji}, c_{ki})}{\sum c_{ji} + \sum c_{ki}}$$</p>
+                <span>Ecological community turnover between two geographic sites or timepoints.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="paper-section mt-4">
+            <h4>2. Experimental Methodology &amp; Pipeline Architecture</h4>
+            <ol class="method-list">
+              <li><strong>Strand-Invariant Feature Representation:</strong> Reads are converted into canonical $k$-mer frequency vectors ($k=4$, 136-dimensional simplex) invariant under reverse-complement strand flips, then projected with $L_2$-norm normalization.</li>
+              <li><strong>Density-Based Operational Taxonomic Unit Clustering:</strong> Scikit-learn HDBSCAN partitions continuous manifold regions without assuming spherical Gaussian clusters or a pre-determined cluster count $K$.</li>
+              <li><strong>Multi-Tiered Divergence Categorization:</strong> Centroid distance thresholds ($\theta_{known}=0.35$, $\theta_{sister}=0.65$) and GLOSH outlier scores categorize reads into confirmed knowns, sister lineages, candidate novel taxa, or chimeric sequencing artifacts.</li>
+              <li><strong>Comprehensive Diversity Accounting:</strong> Unlike alignment pipelines which discard unaligned reads and artificially deflate diversity indices, BioEmbed incorporates unassigned dark clades into unified community metrics.</li>
+            </ol>
+          </div>
+
+          <div class="paper-section mt-4">
+            <h4>3. Current Run Summary</h4>
+            <div id="thesis-run-stats" class="stats-box"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='js/dashboard.js') }}?v={{ cache_bust }}"></script>
+</body>
+</html>
